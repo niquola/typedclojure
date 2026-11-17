@@ -98,7 +98,11 @@
                :when (not (sub/subtype? arg dom opts))]
            ;; only explain map-shape mismatches; plain "X is not Y" is already
            ;; visible from Domains/Arguments, keep those messages unchanged
-           (map #(str "  arg " (inc i) ": " %) (explain-hmap arg dom opts)))
+           (map #(str "  arg " (inc i) ": " %)
+                (or (seq (explain-hmap arg dom opts))
+                    (when-let [h (hints/literal-hint arg dom opts)]
+                      [(str (pr-str (prs/unparse-type arg opts)) " is not assignable to "
+                            (pr-str (prs/unparse-type dom opts)) "." h)]))))
          (apply concat) distinct seq)))
 
 (def app-type-error-kw :typed.clojure/app-type-error)
