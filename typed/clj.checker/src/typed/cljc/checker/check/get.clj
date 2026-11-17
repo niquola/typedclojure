@@ -44,3 +44,18 @@
                              tdefault
                              expected
                              opts))))))
+
+(defn invoke-req!
+  "Clojure 1.13 (req! m k) / RT/req: like get, but throws when k is absent.
+  Typed as a lookup with no nil default: an optional key yields its value type,
+  a key unknown to a complete HMap is a 'Property does not exist' error."
+  [{:keys [args] :as expr} expected {::check/keys [check-expr] :as opts}]
+  (when (= 2 (count args))
+    (when (keyword? (-> args second :form))
+      (let [expr (cond-> (update expr :args #(mapv (fn [e] (check-expr e nil opts)) %))
+                   (#{:host-call} (:op expr)) (update :target check-expr nil opts))
+            [ttarget kwr] (map u/expr-type (:args expr))
+            targett (c/-resolve (r/ret-t ttarget) opts)]
+        (invoke-kw/check-missing-property! targett (r/ret-t kwr) (assoc opts :clojure.core.typed.util-vars/current-env (:env expr)))
+        (assoc expr
+               u/expr-type (invoke-kw/invoke-keyword expr kwr ttarget (r/ret (r/Bottom)) expected opts))))))

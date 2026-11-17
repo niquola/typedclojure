@@ -41,7 +41,7 @@
       (seq (->> non-nil (mapcat #(concat (keys (:types %)) (keys (:optional %))))
                 (keep #(when (r/Value? %) (:val %))) distinct)))))
 
-(defn- check-missing-property! [targett kwt opts]
+(defn check-missing-property! [targett kwt opts]
   (when (and (c/keyword-value? kwt)
              (not= "false" (System/getProperty "typed.clojure.strict-keys")))
     (when-let [known (complete-hmaps-missing-key targett kwt opts)]

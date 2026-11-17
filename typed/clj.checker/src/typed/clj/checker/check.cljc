@@ -684,6 +684,15 @@
               (-> % u/expr-type r/TCResult?))]}
   (get/invoke-get expr expected opts))
 
+;req! (Clojure 1.13): get that throws on a missing key
+(defmethod -invoke-special 'clojure.core/req!
+  [expr expected opts]
+  (get/invoke-req! expr expected opts))
+
+(defmethod -host-call-special '[:static-call clojure.lang.RT/req]
+  [expr expected opts]
+  (get/invoke-req! expr expected opts))
+
 ;FIXME should be the same as (apply hash-map ..) in invoke-apply
 (defmethod -host-call-special '[:static-call clojure.lang.PersistentHashMap/create]
   [expr expected {::check/keys [check-expr] :as opts}]

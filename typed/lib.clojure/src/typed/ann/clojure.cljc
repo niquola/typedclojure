@@ -1530,6 +1530,10 @@ cc/realized? [#?(:clj clojure.lang.IPending
                  :default t/UnsupportedPlatform) :-> t/Bool]
 
 cc/select-keys (t/All [k v] [(t/Map k v) t/AnySeqable :-> (t/Map k v)])
+;; Clojure 1.13 destructuring runtime (:keys!, :select, :excess, :missing, :all)
+cc/to-array [t/Any :-> (Array Object)]
+cc/some-vals (t/All [k v] [(t/Nilable (t/Map k v)) :-> (t/Nilable (t/Map k (t/Not nil)))])
+cc/req! (t/All [k v] [(t/Nilable (t/Map k v)) k :-> v])
 
 cc/sort (t/All [x] [(t/I Comparator [x x :-> t/AnyInteger]) :? (t/Seqable x) :-> (t/ASeq x)])
 cc/sort-by (t/All [a] [[a :-> Number] :? (t/Seqable a) :-> (t/ASeq a)])
