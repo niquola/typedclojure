@@ -61,6 +61,56 @@
         ;if we remove all the arities, default to all of them
         arities)))
 
+;; --- TypeScript-style explanation of why an argument does not fit -------------
+(defn- hmap-keys [m] (into #{} (keep #(when (r/Value? %) (:val %))) (concat (keys (:types m)) (keys (:optional m)))))
+
+(defn- close-key [k known]
+  (let [norm #(.toLowerCase (.replaceAll ^String (name %) "[-_]" ""))
+        lev (fn [^String a ^String b]
+              (peek (reduce (fn [prev [i ca]]
+                              (reduce (fn [row [j cb]]
+                                        (conj row (min (inc (peek row)) (inc (nth prev (inc j)))
+                                                       (+ (nth prev j) (if (= ca cb) 0 1)))))
+                                      [(inc i)] (map-indexed vector b)))
+                            (vec (range (inc (count b)))) (map-indexed vector a))))]
+    (some->> known (map (fn [c] [c (lev (norm k) (norm c))]))
+             (filter #(<= (second %) 2)) (sort-by second) ffirst)))
+
+(defn- explain-hmap [actual expected opts]
+  (let [a (c/fully-resolve-type actual opts)
+        candidates (let [e (c/fully-resolve-type expected opts)]
+                     (filter r/HeterogeneousMap? (if (r/Union? e) (map #(c/fully-resolve-type % opts) (:types e)) [e])))]
+    (when (r/HeterogeneousMap? a)
+      (first (sort-by count
+        (for [e candidates
+              :let [akeys (hmap-keys a) ekeys (hmap-keys e)
+                    excess (when (c/complete-hmap? e) (remove ekeys akeys))
+                    missing (remove (into #{} (keep #(when (r/Value? %) (:val %))) (keys (:types a)))
+                                    (keep #(when (r/Value? %) (:val %)) (keys (:types e))))
+                    wrong (for [[k et] (:types e) :let [at (get (:types a) k)]
+                                :when (and at (not (sub/subtype? at et opts)))]
+                            (str "Type of property " (:val k) " is " (pr-str (prs/unparse-type at opts))
+                                 ", expected " (pr-str (prs/unparse-type et opts))))
+                    lines (concat
+                            (for [k excess]
+                              (str "Object literal may only specify known properties, and " k
+                                   " does not exist in type " (pr-str (prs/unparse-type expected opts))
+                                   (when-let [h (close-key k ekeys)] (str ". Did you mean " h "?"))))
+                            (for [k missing] (str "Property " k " is missing"))
+                            wrong)]
+              :when (seq lines)]
+          lines))))))
+
+(defn- explain-args [fin arg-ret-types opts]
+  (let [arities (filter #(= (count (:dom %)) (count arg-ret-types)) (:types fin))]
+    (->> (for [f arities
+               [i dom arg] (map vector (range) (:dom f) (map r/ret-t arg-ret-types))
+               :when (not (sub/subtype? arg dom opts))]
+           ;; only explain map-shape mismatches; plain "X is not Y" is already
+           ;; visible from Domains/Arguments, keep those messages unchanged
+           (map #(str "  arg " (inc i) ": " %) (explain-hmap arg dom opts)))
+         (apply concat) distinct seq)))
+
 (def app-type-error-kw :typed.clojure/app-type-error)
 
 (err/derive-type-error app-type-error-kw)
@@ -102,6 +152,8 @@
             (ast-u/emit-form-fn fexpr opts)
             "<NO FORM>"))
         " could not be applied to arguments:\n"
+        (when-let [why (try (explain-args fin arg-ret-types opts) (catch Throwable _ nil))]
+          (str "\nWhy:\n" (str/join "\n" why) "\n"))
         (when poly?
           (let [names (cond 
                         (r/Poly? poly?) (c/Poly-fresh-symbols* poly?)

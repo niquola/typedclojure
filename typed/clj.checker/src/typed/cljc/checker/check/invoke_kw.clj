@@ -21,6 +21,56 @@
             [typed.clj.checker.parse-unparse :as prs]
             [clojure.core.typed.errors :as err]))
 
+;; --- TypeScript-style "Property does not exist" for complete HMaps ---------
+(defn- edit-distance [^String a ^String b]
+  (let [n (count b)]
+    (peek (reduce (fn [prev [i ca]]
+                    (reduce (fn [row [j cb]]
+                              (conj row (min (inc (peek row))
+                                             (inc (nth prev (inc j)))
+                                             (+ (nth prev j) (if (= ca cb) 0 1)))))
+                            [(inc i)] (map-indexed vector b)))
+                  (vec (range (inc n))) (map-indexed vector a)))))
+
+(defn- normalize-key [s] (.toLowerCase (.replaceAll ^String s "[-_]" "")))
+
+(defn- did-you-mean [kw known]
+  (let [kn (normalize-key (name kw))]
+    (some->> known
+             (map (fn [k] [k (edit-distance kn (normalize-key (name k)))]))
+             (filter (fn [[k d]] (<= d (max 2 (quot (count (name k)) 3)))))
+             (sort-by second) ffirst)))
+
+(defn- complete-hmaps-missing-key
+  "All non-nil members of t are complete HMaps that do not declare key kwt.
+  Returns their declared keys, or nil when the lookup is legal."
+  [t kwt opts]
+  (let [t (c/fully-resolve-type t opts)
+        members (if (r/Union? t) (:types t) [t])
+        non-nil (remove #(sub/subtype? % r/-nil opts) (map #(c/fully-resolve-type % opts) members))]
+    (when (and (seq non-nil)
+               (every? (fn [m] (and (r/HeterogeneousMap? m)
+                                    (c/complete-hmap? m)
+                                    (not (contains? (:types m) kwt))
+                                    (not (contains? (:optional m) kwt))))
+                       non-nil))
+      ;; empty literal maps ({} → (HMap :complete? true)) are left alone:
+      ;; destructuring/defaulting over {} is idiomatic Clojure
+      (seq (->> non-nil (mapcat #(concat (keys (:types %)) (keys (:optional %))))
+                (keep #(when (r/Value? %) (:val %))) distinct)))))
+
+(defn- check-missing-property! [targett kwt opts]
+  (when (and (c/keyword-value? kwt)
+             (not= "false" (System/getProperty "typed.clojure.strict-keys")))
+    (when-let [known (complete-hmaps-missing-key targett kwt opts)]
+      (let [k (:val kwt)
+            hint (did-you-mean k known)]
+        (err/tc-delayed-error
+          (str "Property " k " does not exist on type " (prs/unparse-type targett opts) "."
+               (when hint (str " Did you mean " hint "?")))
+          {:return r/-nil}
+          opts)))))
+
 ;[(U nil Expr) TCResult TCResult (Option TCResult) (Option TCResult) -> TCResult]
 (defn invoke-keyword [expr kw-ret target-ret default-ret expected-ret opts]
   {:pre [(r/TCResult? kw-ret)
@@ -32,7 +82,9 @@
   (let [targett (c/-resolve (r/ret-t target-ret) opts)
         kwt (r/ret-t kw-ret)
         defaultt (or (some-> default-ret r/ret-t)
-                     r/-nil)]
+                     r/-nil)
+        _ (when-not default-ret
+            (check-missing-property! targett kwt (update opts ::vs/current-env #(or expr %))))]
     (cond
       ;Keyword must be a singleton with no default
       (c/keyword-value? kwt)
