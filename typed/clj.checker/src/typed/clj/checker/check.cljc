@@ -1776,6 +1776,9 @@
         ; Can we derive extra information from 'failed'
         ; tests? Delegate to check-case-thens for future enhancements.
         cthens (case/check-case-thens target-ret tests-rets thens expected opts)
+        ;; TypeScript-style exhaustiveness: a case without a default over a
+        ;; union of literals must cover every literal.
+        _ (case/check-exhaustive! target-ret tests-rets default opts)
         cdefault (let [flag+ (volatile! true)
                        neg-tst-fl (let [val-ts (map (comp #(c/fully-resolve-type % opts) r/ret-t) tests-rets)]
                                     (if (every? r/Value? val-ts)

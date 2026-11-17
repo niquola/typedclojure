@@ -15,7 +15,35 @@
             [typed.cljc.checker.lex-env :as lex]
             [typed.cljc.checker.update :as update]
             [typed.cljc.checker.check :as check]
-            [typed.clj.checker.tc-equiv :as equiv]))
+            [typed.clj.checker.tc-equiv :as equiv]
+            [typed.cljc.checker.type-ctors :as c]
+            [typed.cljc.checker.ts-hints :as hints]
+            [clojure.core.typed.errors :as err]))
+
+(defn- no-default?
+  "clojure.core/case without a default expands to (throw (IllegalArgumentException. (str \"No matching clause: \" ...)))."
+  [default]
+  (let [form (:form default)]
+    (and (seq? form)
+         (= 'throw (first form))
+         (re-find #"No matching clause" (pr-str form)))))
+
+(defn check-exhaustive!
+  "Report literals of the target's union type not covered by a case without default."
+  [target-ret tst-rets default opts]
+  (when (and (no-default? default)
+             (not= "false" (System/getProperty "typed.clojure.exhaustive-case")))
+    (when-let [vs (hints/literal-values (r/ret-t target-ret) opts)]
+      (let [covered (into #{} (keep (fn [ret] (let [t (c/fully-resolve-type (r/ret-t ret) opts)]
+                                                (when (r/Value? t) (:val t)))))
+                          tst-rets)
+            missing (remove covered vs)]
+        (when (seq missing)
+          (err/tc-delayed-error
+            (str "case is not exhaustive: no clause for " (apply str (interpose ", " (map pr-str missing)))
+                 ". Add the missing clause(s) or a default.")
+            {:return r/-any}
+            opts))))))
 
 (defn check-case-thens [target-ret tst-rets case-thens expected {::check/keys [check-expr] :as opts}]
   {:pre [(r/TCResult? target-ret)

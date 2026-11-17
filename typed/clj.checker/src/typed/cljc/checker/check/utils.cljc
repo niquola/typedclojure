@@ -33,7 +33,8 @@
             [typed.cljc.runtime.env :as env]
             [clojure.core.typed.ast-utils :as ast-u]
             [clojure.set :as set]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [typed.cljc.checker.ts-hints :as hints])
   (:import (clojure.lang MultiFn)))
 
 ;(t/ann expr-ns [Any t/Any -> t/Sym])
@@ -97,7 +98,9 @@
          actual-type (prs/unparse-type actual opts)]
      (err/tc-delayed-error (str "Type mismatch:"
                                 "\n\nExpected: \t" (pr-str expected-type)
-                                "\n\nActual: \t" (pr-str actual-type))
+                                "\n\nActual: \t" (pr-str actual-type)
+                                (when-let [h (hints/literal-hint actual (:t expected) opts)]
+                                  (str "\n\n" (str/triml h))))
                            (-> {:expected expected
                                 :actual actual}
                                (into opt)

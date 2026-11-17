@@ -452,6 +452,48 @@
 
 (defmethod parse-type-list 'typed.clojure/Merge [t opts] (parse-Merge t opts))
 
+;; --- TypeScript-style mapped types over HMaps: Pick, Omit, Partial, Required ---
+;; Eagerly computed at parse time from the (fully resolved) HMap argument.
+(defn- hmap-arg [op tsyn opts]
+  (let [t ((requiring-resolve 'typed.cljc.checker.type-ctors/fully-resolve-type) (parse-type tsyn opts) opts)]
+    (when-not (r/HeterogeneousMap? t)
+      (prs-error (str "t/" op " expects an HMap type, given: " (pr-str tsyn)) opts))
+    t))
+
+(defn- kw-types [op ks opts]
+  (when-not (every? keyword? ks)
+    (prs-error (str "t/" op " expects keyword keys, given: " (pr-str ks)) opts))
+  (into #{} (map r/-val) ks))
+
+(defn- rebuild-hmap [t mandatory optional opts]
+  ((requiring-resolve 'typed.cljc.checker.type-ctors/make-HMap)
+   opts {:mandatory mandatory :optional optional
+         :absent-keys (:absent-keys t)
+         :complete? (not (:other-keys? t))}))
+
+(defn parse-Pick [[_ tsyn & ks] opts]
+  (let [t (hmap-arg "Pick" tsyn opts) ks (kw-types "Pick" ks opts)]
+    (rebuild-hmap t (select-keys (:types t) ks) (select-keys (:optional t) ks) opts)))
+
+(defn parse-Omit [[_ tsyn & ks] opts]
+  (let [t (hmap-arg "Omit" tsyn opts) ks (kw-types "Omit" ks opts)]
+    (rebuild-hmap t (apply dissoc (:types t) ks) (apply dissoc (:optional t) ks) opts)))
+
+(defn parse-Partial [[_ tsyn :as all] opts]
+  (when-not (= 2 (count all)) (prs-error (str "Wrong arguments to t/Partial: " (pr-str all)) opts))
+  (let [t (hmap-arg "Partial" tsyn opts)]
+    (rebuild-hmap t {} (merge (:optional t) (:types t)) opts)))
+
+(defn parse-Required [[_ tsyn :as all] opts]
+  (when-not (= 2 (count all)) (prs-error (str "Wrong arguments to t/Required: " (pr-str all)) opts))
+  (let [t (hmap-arg "Required" tsyn opts)]
+    (rebuild-hmap t (merge (:types t) (:optional t)) {} opts)))
+
+(defmethod parse-type-list 'typed.clojure/Pick [t opts] (parse-Pick t opts))
+(defmethod parse-type-list 'typed.clojure/Omit [t opts] (parse-Omit t opts))
+(defmethod parse-type-list 'typed.clojure/Partial [t opts] (parse-Partial t opts))
+(defmethod parse-type-list 'typed.clojure/Required [t opts] (parse-Required t opts))
+
 (defn parse-Instance [[_ tsyn :as all] opts]
   (impl/assert-clojure opts)
   (when-not (= 2 (count all))

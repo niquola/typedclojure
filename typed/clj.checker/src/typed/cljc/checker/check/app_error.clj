@@ -15,6 +15,7 @@
             [clojure.core.typed.ast-utils :as ast-u]
             [typed.cljc.checker.type-ctors :as c]
             [typed.clj.checker.subtype :as sub]
+            [typed.cljc.checker.ts-hints :as hints]
             [clojure.string :as str]))
 
 ;; true if domains of l is a subtype of domains of r.
@@ -64,18 +65,6 @@
 ;; --- TypeScript-style explanation of why an argument does not fit -------------
 (defn- hmap-keys [m] (into #{} (keep #(when (r/Value? %) (:val %))) (concat (keys (:types m)) (keys (:optional m)))))
 
-(defn- close-key [k known]
-  (let [norm #(.toLowerCase (.replaceAll ^String (name %) "[-_]" ""))
-        lev (fn [^String a ^String b]
-              (peek (reduce (fn [prev [i ca]]
-                              (reduce (fn [row [j cb]]
-                                        (conj row (min (inc (peek row)) (inc (nth prev (inc j)))
-                                                       (+ (nth prev j) (if (= ca cb) 0 1)))))
-                                      [(inc i)] (map-indexed vector b)))
-                            (vec (range (inc (count b)))) (map-indexed vector a))))]
-    (some->> known (map (fn [c] [c (lev (norm k) (norm c))]))
-             (filter #(<= (second %) 2)) (sort-by second) ffirst)))
-
 (defn- explain-hmap [actual expected opts]
   (let [a (c/fully-resolve-type actual opts)
         candidates (let [e (c/fully-resolve-type expected opts)]
@@ -90,12 +79,13 @@
                     wrong (for [[k et] (:types e) :let [at (get (:types a) k)]
                                 :when (and at (not (sub/subtype? at et opts)))]
                             (str "Type of property " (:val k) " is " (pr-str (prs/unparse-type at opts))
-                                 ", expected " (pr-str (prs/unparse-type et opts))))
+                                 ", expected " (pr-str (prs/unparse-type et opts))
+                                 (hints/literal-hint at et opts)))
                     lines (concat
                             (for [k excess]
                               (str "Object literal may only specify known properties, and " k
                                    " does not exist in type " (pr-str (prs/unparse-type expected opts))
-                                   (when-let [h (close-key k ekeys)] (str ". Did you mean " h "?"))))
+                                   (when-let [h (hints/closest k ekeys)] (str ". Did you mean " h "?"))))
                             (for [k missing] (str "Property " k " is missing"))
                             wrong)]
               :when (seq lines)]

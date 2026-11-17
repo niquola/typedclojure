@@ -19,28 +19,10 @@
             [typed.cljc.checker.proposition-ops :as fo]
             [typed.cljc.checker.object-rep :as obj]
             [typed.clj.checker.parse-unparse :as prs]
-            [clojure.core.typed.errors :as err]))
+            [clojure.core.typed.errors :as err]
+            [typed.cljc.checker.ts-hints :as hints]))
 
 ;; --- TypeScript-style "Property does not exist" for complete HMaps ---------
-(defn- edit-distance [^String a ^String b]
-  (let [n (count b)]
-    (peek (reduce (fn [prev [i ca]]
-                    (reduce (fn [row [j cb]]
-                              (conj row (min (inc (peek row))
-                                             (inc (nth prev (inc j)))
-                                             (+ (nth prev j) (if (= ca cb) 0 1)))))
-                            [(inc i)] (map-indexed vector b)))
-                  (vec (range (inc n))) (map-indexed vector a)))))
-
-(defn- normalize-key [s] (.toLowerCase (.replaceAll ^String s "[-_]" "")))
-
-(defn- did-you-mean [kw known]
-  (let [kn (normalize-key (name kw))]
-    (some->> known
-             (map (fn [k] [k (edit-distance kn (normalize-key (name k)))]))
-             (filter (fn [[k d]] (<= d (max 2 (quot (count (name k)) 3)))))
-             (sort-by second) ffirst)))
-
 (defn- complete-hmaps-missing-key
   "All non-nil members of t are complete HMaps that do not declare key kwt.
   Returns their declared keys, or nil when the lookup is legal."
@@ -64,7 +46,7 @@
              (not= "false" (System/getProperty "typed.clojure.strict-keys")))
     (when-let [known (complete-hmaps-missing-key targett kwt opts)]
       (let [k (:val kwt)
-            hint (did-you-mean k known)]
+            hint (hints/closest k known)]
         (err/tc-delayed-error
           (str "Property " k " does not exist on type " (prs/unparse-type targett opts) "."
                (when hint (str " Did you mean " hint "?")))
